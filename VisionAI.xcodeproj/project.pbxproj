@@ -6,10 +6,40 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXFileReference section */
+		059D1FC02EA2E97300315892 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = manifest.json; sourceTree = "<group>"; };
+		059D1FC12EA2E9B400315892 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = background.js; sourceTree = "<group>"; };
+		059D1FC22EA2E9D100315892 /* content.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = content.js; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		059D1FC32EA2E9E800315892 /* utils */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = utils;
+			sourceTree = "<group>";
+		};
+		059D1FC72EA2EA8300315892 /* popup */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = popup;
+			sourceTree = "<group>";
+		};
+		059D1FCA2EA2EC9800315892 /* assets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = assets;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
 /* Begin PBXGroup section */
 		059D1FB92EA2E85400315892 = {
 			isa = PBXGroup;
 			children = (
+				059D1FCA2EA2EC9800315892 /* assets */,
+				059D1FC72EA2EA8300315892 /* popup */,
+				059D1FC32EA2E9E800315892 /* utils */,
+				059D1FC22EA2E9D100315892 /* content.js */,
+				059D1FC12EA2E9B400315892 /* background.js */,
+				059D1FC02EA2E97300315892 /* manifest.json */,
 			);
 			sourceTree = "<group>";
 		};
