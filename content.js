@@ -3,32 +3,80 @@ document.addEventListener('mouseup', async (event) => {
   const selectedText = selection && selection.toString().trim();
 
   if (selectedText && selectedText.length > 10) {
-    const confirmSummarize = confirm('Do you want to summarize the selected text?');
-    if (!confirmSummarize) return;
+    let actionText = '';
+    if (actionMode === 'summarize') {
+      actionText = 'summarize';
+    } else if (actionMode === 'translate') {
+      actionText = 'translate';
+    } else if (actionMode === 'both') {
+      actionText = 'summarize and translate';
+    }
+    
+    const confirmAction = confirm(`Do you want to ${actionText} the selected text?`);
+    if (!confirmAction) return;
 
     try {
-      // Summarize selected text
-      const summary = await aiSummarizeWithBuiltIn(selectedText, {
-        type: 'tldr',
-        format: 'plain-text',
-        length: 'short',
-        outputLanguage: 'en'
-      });
+      let finalText = '';
+      
+      // Handle different action modes
+      if (actionMode === 'summarize') {
+        // Only summarize
+        speak('Summarizing selected text.');
+        finalText = await aiSummarizeWithBuiltIn(selectedText, {
+          type: 'tldr',
+          format: 'plain-text',
+          length: 'short',
+          outputLanguage: 'en'
+        });
+      } 
+      else if (actionMode === 'translate') {
+        // Only translate (detect source language or assume English)
+        speak('Translating selected text.');
+        finalText = await aiTranslateWithBuiltIn(selectedText, {
+          sourceLanguage: 'en', // You can add language detection later
+          targetLanguage: targetLanguage
+        });
+      }
+      else if (actionMode === 'both') {
+        // Summarize first, then translate
+        speak('Summarizing selected text.');
+        const summary = await aiSummarizeWithBuiltIn(selectedText, {
+          type: 'tldr',
+          format: 'plain-text',
+          length: 'short',
+          outputLanguage: 'en'
+        });
+        
+        if (targetLanguage !== 'en') {
+          speak('Translating summary.');
+          finalText = await aiTranslateWithBuiltIn(summary, {
+            sourceLanguage: 'en',
+            targetLanguage: targetLanguage
+          });
+        } else {
+          finalText = summary;
+        }
+      }
 
       // Show custom floating popup
-      showSummaryPopup(summary);
+      showSummaryPopup(finalText);
 
-      // Speak the summary simultaneously
-      speak(summary);
+      // Speak the result
+      speak(finalText);
 
     } catch (e) {
-      alert('Summarizer error: ' + e.message);
+      alert('Error: ' + e.message);
+      console.error('Action error:', e);
     }
   }
 });
 
 function speak(text) {
   if (!text) return;
+  
+  // Cancel any ongoing speech to prevent overlap
+  window.speechSynthesis.cancel();
+  
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = 'en-US';
   utterance.rate = 1;
@@ -80,16 +128,53 @@ function showSummaryPopup(summaryText) {
   document.body.appendChild(popup);
 }
 let focusSummarizeMode = false;
+let hoverSummarizeMode = false;
+let actionMode = 'summarize'; // 'summarize', 'translate', or 'both'
+let targetLanguage = 'es';
+let hoverTimeout = null;
+let lastHoveredElement = null;
+
+// Check if modes are enabled on page load
+chrome.storage.local.get(['focusModeEnabled', 'hoverModeEnabled', 'actionMode', 'targetLanguage'], (result) => {
+  if (result.focusModeEnabled) {
+    focusSummarizeMode = true;
+    enableFocusSummarize();
+    speak('Focus summarize mode is active. Navigate with Tab and press K to summarize.');
+  }
+  if (result.hoverModeEnabled) {
+    hoverSummarizeMode = true;
+    enableHoverSummarize();
+    speak('Hover summarize mode is active. Hover over content to summarize.');
+  }
+  if (result.actionMode) {
+    actionMode = result.actionMode;
+  }
+  if (result.targetLanguage) {
+    targetLanguage = result.targetLanguage;
+  }
+});
 
 chrome.runtime.onMessage.addListener(async (msg) => {
   if (msg.type === 'focus_mode_on') {
     focusSummarizeMode = true;
-    speak('Focus summarize mode is now active. Move with Tab to focus content and press Enter to summarize.');
+    speak('Focus summarize mode is now active. Move with Tab to focus content and press K to summarize.');
     enableFocusSummarize();
   } else if (msg.type === 'focus_mode_off') {
     focusSummarizeMode = false;
     speak('Focus summarize mode is now off.');
     disableFocusSummarize();
+  } else if (msg.type === 'hover_mode_on') {
+    hoverSummarizeMode = true;
+    speak('Hover summarize mode is now active. Hover over content to summarize.');
+    enableHoverSummarize();
+  } else if (msg.type === 'hover_mode_off') {
+    hoverSummarizeMode = false;
+    speak('Hover summarize mode is now off.');
+    disableHoverSummarize();
+  } else if (msg.type === 'action_mode_changed') {
+    actionMode = msg.actionMode;
+    targetLanguage = msg.targetLanguage;
+    console.log('Action mode updated:', { actionMode, targetLanguage });
   }
 });
 
@@ -101,38 +186,316 @@ function disableFocusSummarize() {
   document.removeEventListener('keydown', handleFocusSummarizeKey);
 }
 
-async function handleFocusSummarizeKey(e) {
-  if (!focusSummarizeMode) return;
-  if (e.key !== 'Enter') return; // only trigger with Enter
+function enableHoverSummarize() {
+  document.addEventListener('mouseover', handleHoverSummarize);
+  document.addEventListener('mouseout', handleMouseOut);
+}
 
-  const el = document.activeElement;
-  if (!el) return;
-
-  let text = '';
-
-  // Grab text based on element type
-  if (el.innerText) text = el.innerText.trim();
-  else if (el.value) text = el.value.trim();
-
-  // Fallback to a small region of the page
-  if (!text || text.length < 20) {
-    text = document.body.innerText.slice(0, 5000);
-  }
-
-  try {
-    speak('Summarizing focused content.');
-    const summary = await aiSummarizeWithBuiltIn(text, {
-      type: 'tldr',
-      format: 'plain-text',
-      length: 'short',
-      outputLanguage: 'en'
-    });
-    // Speak the summary aloud and show popup
-    speak(summary);
-    showSummaryPopup(summary);
-  } catch (err) {
-    speak('Summarization failed: ' + err.message);
+function disableHoverSummarize() {
+  document.removeEventListener('mouseover', handleHoverSummarize);
+  document.removeEventListener('mouseout', handleMouseOut);
+  if (hoverTimeout) {
+    clearTimeout(hoverTimeout);
+    hoverTimeout = null;
   }
 }
 
-// Reuse your existing speak() and showSummaryPopup() from before.
+async function handleFocusSummarizeKey(e) {
+  if (!focusSummarizeMode) return;
+  
+  // Trigger with 'K' key
+  if (e.key.toLowerCase() !== 'k') return;
+
+  // Prevent default action
+  e.preventDefault();
+  e.stopPropagation();
+
+  const el = document.activeElement;
+  if (!el) {
+    speak('No element is currently focused.');
+    return;
+  }
+
+  console.log('Focused element:', el.tagName, el);
+
+  let text = '';
+
+  // First, check if the focused element or its closest parent is a paragraph
+  const paragraph = el.closest('p');
+  if (paragraph && paragraph.innerText && paragraph.innerText.trim().length > 20) {
+    text = paragraph.innerText.trim();
+    console.log('Got text from paragraph:', text.substring(0, 100));
+  }
+  // If not in a paragraph, try to get text from the focused element
+  else if (el.innerText && el.innerText.trim().length > 20) {
+    text = el.innerText.trim();
+    console.log('Got text from element innerText:', text.substring(0, 100));
+  } 
+  // For input/textarea elements
+  else if (el.value && el.value.trim().length > 20) {
+    text = el.value.trim();
+    console.log('Got text from input value:', text.substring(0, 100));
+  }
+  // Try textContent
+  else if (el.textContent && el.textContent.trim().length > 20) {
+    text = el.textContent.trim();
+    console.log('Got text from textContent:', text.substring(0, 100));
+  }
+
+  // If still no substantial text, look for surrounding paragraphs
+  if (!text || text.length < 20) {
+    console.log('Text too short, looking for surrounding paragraphs');
+    
+    // Try to find all paragraphs in the nearest container
+    const container = el.closest('article, main, section, div[role="article"], div[role="main"], .content, .post, .article');
+    
+    if (container) {
+      // Get all paragraphs within the container
+      const paragraphs = container.querySelectorAll('p');
+      if (paragraphs.length > 0) {
+        // Combine text from all paragraphs
+        text = Array.from(paragraphs)
+          .map(p => p.innerText.trim())
+          .filter(t => t.length > 0)
+          .join(' ')
+          .slice(0, 5000);
+        console.log('Got text from container paragraphs:', text.substring(0, 100));
+      }
+    }
+    
+    // If still nothing, try the parent element
+    if ((!text || text.length < 20) && el.parentElement && el.parentElement.innerText) {
+      text = el.parentElement.innerText.trim();
+      console.log('Got text from parent element:', text.substring(0, 100));
+    }
+    
+    // Last resort: get the nearest semantic container
+    if (!text || text.length < 20) {
+      const semanticContainer = el.closest('article, main, section, [role="article"], [role="main"]');
+      if (semanticContainer && semanticContainer.innerText) {
+        text = semanticContainer.innerText.trim().slice(0, 5000);
+        console.log('Got text from semantic container:', text.substring(0, 100));
+      } else {
+        // Ultimate fallback: use body text
+        text = document.body.innerText.trim().slice(0, 5000);
+        console.log('Using body text as fallback');
+      }
+    }
+  }
+
+  // Final check
+  if (!text || text.length < 10) {
+    speak('Could not find any content to summarize. Please focus on an element with text.');
+    return;
+  }
+
+  console.log('Final text to summarize (length ' + text.length + '):', text.substring(0, 200));
+
+  try {
+    let finalText = '';
+    
+    // Handle different action modes
+    if (actionMode === 'summarize') {
+      // Only summarize
+      speak('Summarizing. Please wait.');
+      finalText = await aiSummarizeWithBuiltIn(text, {
+        type: 'tldr',
+        format: 'plain-text',
+        length: 'short',
+        outputLanguage: 'en'
+      });
+    } 
+    else if (actionMode === 'translate') {
+      // Only translate
+      speak('Translating. Please wait.');
+      finalText = await aiTranslateWithBuiltIn(text, {
+        sourceLanguage: 'en',
+        targetLanguage: targetLanguage
+      });
+    }
+    else if (actionMode === 'both') {
+      // Summarize first, then translate
+      speak('Summarizing. Please wait.');
+      const summary = await aiSummarizeWithBuiltIn(text, {
+        type: 'tldr',
+        format: 'plain-text',
+        length: 'short',
+        outputLanguage: 'en'
+      });
+      
+      if (targetLanguage !== 'en') {
+        speak('Translating summary.');
+        finalText = await aiTranslateWithBuiltIn(summary, {
+          sourceLanguage: 'en',
+          targetLanguage: targetLanguage
+        });
+      } else {
+        finalText = summary;
+      }
+    }
+    
+    console.log('Final result:', finalText);
+    
+    // Speak the final text and show popup
+    speak(finalText);
+    showSummaryPopup(finalText);
+  } catch (err) {
+    speak('Operation failed: ' + err.message);
+    console.error('Operation error:', err);
+  }
+}
+
+// Hover mode handlers
+function handleHoverSummarize(e) {
+  if (!hoverSummarizeMode) return;
+  
+  const el = e.target;
+  
+  // Ignore if hovering over our own popup
+  if (el.id === 'visionai-summary-popup' || el.closest('#visionai-summary-popup')) {
+    return;
+  }
+  
+  // Clear any existing timeout
+  if (hoverTimeout) {
+    clearTimeout(hoverTimeout);
+  }
+  
+  // Wait 1 second before summarizing (debounce)
+  hoverTimeout = setTimeout(async () => {
+    // Don't summarize the same element twice in a row
+    if (el === lastHoveredElement) return;
+    lastHoveredElement = el;
+    
+    await summarizeElement(el);
+  }, 1000); // 1 second hover delay
+}
+
+function handleMouseOut(e) {
+  if (!hoverSummarizeMode) return;
+  
+  // Clear timeout when mouse leaves
+  if (hoverTimeout) {
+    clearTimeout(hoverTimeout);
+    hoverTimeout = null;
+  }
+}
+
+async function summarizeElement(el) {
+  console.log('Hovered element:', el.tagName, el);
+
+  let text = '';
+
+  // First, check if the hovered element IS a paragraph itself
+  if (el.tagName === 'P' && el.innerText && el.innerText.trim().length > 20) {
+    text = el.innerText.trim();
+    console.log('Hovered element is a paragraph:', text.substring(0, 100));
+  }
+  // Second, check if we're hovering on something INSIDE a paragraph
+  else {
+    const paragraph = el.closest('p');
+    if (paragraph && paragraph.innerText && paragraph.innerText.trim().length > 20) {
+      text = paragraph.innerText.trim();
+      console.log('Got text from parent paragraph:', text.substring(0, 100));
+    }
+    // If not in a paragraph, try to get text from the hovered element itself
+    else if (el.innerText && el.innerText.trim().length > 20) {
+      text = el.innerText.trim();
+      console.log('Got text from element innerText:', text.substring(0, 100));
+    }
+    // Try textContent
+    else if (el.textContent && el.textContent.trim().length > 20) {
+      text = el.textContent.trim();
+      console.log('Got text from textContent:', text.substring(0, 100));
+    }
+  }
+
+  // If still no substantial text, look for surrounding paragraphs
+  if (!text || text.length < 20) {
+    console.log('Text too short, looking for surrounding paragraphs');
+    
+    // Try to find all paragraphs in the nearest container
+    const container = el.closest('article, main, section, div[role="article"], div[role="main"], .content, .post, .article');
+    
+    if (container) {
+      // Get all paragraphs within the container
+      const paragraphs = container.querySelectorAll('p');
+      if (paragraphs.length > 0) {
+        // Combine text from all paragraphs
+        text = Array.from(paragraphs)
+          .map(p => p.innerText.trim())
+          .filter(t => t.length > 0)
+          .join(' ')
+          .slice(0, 5000);
+        console.log('Got text from container paragraphs:', text.substring(0, 100));
+      }
+    }
+    
+    // If still nothing, try the parent element
+    if ((!text || text.length < 20) && el.parentElement && el.parentElement.innerText) {
+      text = el.parentElement.innerText.trim();
+      console.log('Got text from parent element:', text.substring(0, 100));
+    }
+  }
+
+  // Don't summarize if text is too short
+  if (!text || text.length < 20) {
+    console.log('Not enough text to summarize from hover');
+    return;
+  }
+
+  console.log('Final text to summarize (length ' + text.length + '):', text.substring(0, 200));
+
+  try {
+    let finalText = '';
+    
+    // Handle different action modes
+    if (actionMode === 'summarize') {
+      // Only summarize
+      speak('Summarizing hovered content.');
+      finalText = await aiSummarizeWithBuiltIn(text, {
+        type: 'tldr',
+        format: 'plain-text',
+        length: 'short',
+        outputLanguage: 'en'
+      });
+    } 
+    else if (actionMode === 'translate') {
+      // Only translate
+      speak('Translating hovered content.');
+      finalText = await aiTranslateWithBuiltIn(text, {
+        sourceLanguage: 'en',
+        targetLanguage: targetLanguage
+      });
+    }
+    else if (actionMode === 'both') {
+      // Summarize first, then translate
+      speak('Summarizing hovered content.');
+      const summary = await aiSummarizeWithBuiltIn(text, {
+        type: 'tldr',
+        format: 'plain-text',
+        length: 'short',
+        outputLanguage: 'en'
+      });
+      
+      if (targetLanguage !== 'en') {
+        speak('Translating summary.');
+        finalText = await aiTranslateWithBuiltIn(summary, {
+          sourceLanguage: 'en',
+          targetLanguage: targetLanguage
+        });
+      } else {
+        finalText = summary;
+      }
+    }
+    
+    console.log('Final result:', finalText);
+    
+    // Speak the final text and show popup
+    speak(finalText);
+    showSummaryPopup(finalText);
+  } catch (err) {
+    speak('Operation failed: ' + err.message);
+    console.error('Operation error:', err);
+  }
+}

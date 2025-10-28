@@ -30,4 +30,47 @@ async function aiSummarizeWithBuiltIn(text, options = {}) {
   return summary;
 }
 
+async function aiTranslateWithBuiltIn(text, options = {}) {
+  if (!('Translator' in self)) {
+    throw new Error('Translator API not supported in this browser.');
+  }
+
+  const sourceLanguage = options.sourceLanguage || 'en';
+  const targetLanguage = options.targetLanguage || 'es';
+
+  console.log(`Translating from ${sourceLanguage} to ${targetLanguage}`);
+
+  // Check if translation is available for this language pair
+  const translatorCapabilities = await Translator.availability({
+    sourceLanguage: sourceLanguage,
+    targetLanguage: targetLanguage,
+  });
+
+  console.log('Translator capabilities:', translatorCapabilities);
+
+  if (translatorCapabilities === 'no') {
+    throw new Error(`Translation from ${sourceLanguage} to ${targetLanguage} is not available.`);
+  }
+
+  // Create translator with download progress monitoring
+  const translator = await Translator.create({
+    sourceLanguage: sourceLanguage,
+    targetLanguage: targetLanguage,
+    monitor(m) {
+      m.addEventListener('downloadprogress', (e) => {
+        console.log(`Translation model downloaded ${e.loaded * 100}%`);
+      });
+    },
+  });
+
+  console.log('Created translator');
+
+  // Translate the text
+  const translatedText = await translator.translate(text);
+
+  console.log('Translation result:', translatedText);
+  return translatedText;
+}
+
 window.aiSummarizeWithBuiltIn = aiSummarizeWithBuiltIn;
+window.aiTranslateWithBuiltIn = aiTranslateWithBuiltIn;
