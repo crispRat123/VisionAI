@@ -1,12 +1,20 @@
 <!DOCTYPE html>
 <html>
-  <head><link rel="stylesheet" href="popup.css" /></head>
-  <body>
-    <h3>VisionAI</h3>
-  <button id="toggleBtn">🔴 Off</button>
-  <button id="summarizeBtn">Summarize Selection</button>
-  <div id="summaryResult" style="margin-top:10px;"></div>
-    <script src="popup.js"></script>
-  </body>
-</html>
+<head>
+  <title>VisionAI</title>
+  <style>
+    body { font-family: sans-serif; padding: 10px; width: 200px; }
+    label { display: flex; align-items: center; gap: 8px; }
+  </style>
+</head>
+<body>
+  <h3>VisionAI</h3>
+  <label>
+    <input type="checkbox" id="focusToggle"> Focus Summarize Mode
+  </label>
 
+  <p id="status" style="font-size: 13px; color: #666;"></p>
+
+  <script src="popup.js"></script>
+</body>
+</html>
