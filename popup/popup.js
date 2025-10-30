@@ -177,7 +177,7 @@ document.addEventListener('DOMContentLoaded', () => {
         masterToggleSlider.classList.add('active');
         masterToggleContainer.classList.remove('disabled');
         settingsContent.classList.remove('disabled');
-        masterToggleText.textContent = '🚀 VisionAI Enabled';
+        masterToggleText.textContent = '✨VisionAI Enabled✨';
       } else {
         masterToggleSwitch.classList.remove('active');
         masterToggleSlider.classList.remove('active');
