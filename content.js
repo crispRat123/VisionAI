@@ -215,6 +215,7 @@ document.addEventListener('mouseup', async (event) => {
   let extensionEnabled = true; // Master toggle - default to true
   let hoverTimeout = null;
   let lastHoveredElement = null;
+  let currentHoveredElement = null; // Track currently hovered element for K key
 
   // Check if modes are enabled on page load
   chrome.storage.local.get(['extensionEnabled', 'focusModeEnabled', 'hoverModeEnabled', 'audioEnabled', 'actionMode', 'targetLanguage'], (result) => {
@@ -273,29 +274,25 @@ document.addEventListener('mouseup', async (event) => {
       if (extensionEnabled) {
         focusSummarizeMode = true;
         if (audioEnabled) {
-          speak('Focus summarize mode is now active. Move with Tab to focus content and press K to summarize.');
+          speak('Focus mode activated. Navigate with Tab and press K to process content.');
         }
         enableFocusSummarize();
       }
     } else if (msg.type === 'focus_mode_off') {
       focusSummarizeMode = false;
-      if (audioEnabled && extensionEnabled) {
-        speak('Focus summarize mode is now off.');
-      }
+      // Don't speak when turning off - it's usually during a mode switch
       disableFocusSummarize();
     } else if (msg.type === 'hover_mode_on') {
       if (extensionEnabled) {
         hoverSummarizeMode = true;
         if (audioEnabled) {
-          speak('Hover summarize mode is now active. Hover over content to summarize.');
+          speak('Hover mode activated. Hover over content and press K to process.');
         }
         enableHoverSummarize();
       }
     } else if (msg.type === 'hover_mode_off') {
       hoverSummarizeMode = false;
-      if (audioEnabled && extensionEnabled) {
-        speak('Hover summarize mode is now off.');
-      }
+      // Don't speak when turning off - it's usually during a mode switch
       disableHoverSummarize();
     } else if (msg.type === 'audio_toggle') {
       audioEnabled = msg.audioEnabled;
@@ -318,19 +315,22 @@ document.addEventListener('mouseup', async (event) => {
   function enableHoverSummarize() {
     document.addEventListener('mouseover', handleHoverSummarize);
     document.addEventListener('mouseout', handleMouseOut);
+    document.addEventListener('keydown', handleHoverSummarizeKey);
   }
 
   function disableHoverSummarize() {
     document.removeEventListener('mouseover', handleHoverSummarize);
     document.removeEventListener('mouseout', handleMouseOut);
+    document.removeEventListener('keydown', handleHoverSummarizeKey);
     if (hoverTimeout) {
       clearTimeout(hoverTimeout);
       hoverTimeout = null;
     }
+    currentHoveredElement = null;
   }
 
-  async function handleFocusSummarizeKey(e) {
-    if (!focusSummarizeMode || !extensionEnabled) return;
+  async function handleHoverSummarizeKey(e) {
+    if (!hoverSummarizeMode || !extensionEnabled) return;
     
     // Trigger with 'K' key
     if (e.key.toLowerCase() !== 'k') return;
@@ -339,23 +339,43 @@ document.addEventListener('mouseup', async (event) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const el = document.activeElement;
-    if (!el) {
-      if (audioEnabled) speak('No element is currently focused.');
+    if (!currentHoveredElement) {
+      if (audioEnabled) speak('No element is currently hovered. Hover over content first.');
       return;
     }
 
-    console.log('Focused element:', el.tagName, el);
+    console.log('Processing hovered element with K key:', currentHoveredElement.tagName);
+
+    // Check if the hovered element is an image
+    if (currentHoveredElement.tagName === 'IMG') {
+      await describeImage(currentHoveredElement);
+      return;
+    }
+
+    // Check if hovering over a container with an image
+    const imageInElement = currentHoveredElement.querySelector('img');
+    if (imageInElement) {
+      await describeImage(imageInElement);
+      return;
+    }
+
+    // Process text content
+    await processTextContent(currentHoveredElement);
+  }
+
+  // Shared function to extract and process text content from an element
+  async function processTextContent(el) {
+    console.log('Processing element:', el.tagName, el);
 
     let text = '';
 
-    // First, check if the focused element or its closest parent is a paragraph
+    // First, check if the element or its closest parent is a paragraph
     const paragraph = el.closest('p');
     if (paragraph && paragraph.innerText && paragraph.innerText.trim().length > 20) {
       text = paragraph.innerText.trim();
       console.log('Got text from paragraph:', text.substring(0, 100));
     }
-    // If not in a paragraph, try to get text from the focused element
+    // If not in a paragraph, try to get text from the element
     else if (el.innerText && el.innerText.trim().length > 20) {
       text = el.innerText.trim();
       console.log('Got text from element innerText:', text.substring(0, 100));
@@ -414,11 +434,11 @@ document.addEventListener('mouseup', async (event) => {
 
     // Final check
     if (!text || text.length < 10) {
-      if (audioEnabled) speak('Could not find any content to summarize. Please focus on an element with text.');
+      if (audioEnabled) speak('Could not find any content to process. Please select an element with text.');
       return;
     }
 
-    console.log('Final text to summarize (length ' + text.length + '):', text.substring(0, 200));
+    console.log('Final text to process (length ' + text.length + '):', text.substring(0, 200));
 
     try {
       let finalText = '';
@@ -464,18 +484,54 @@ document.addEventListener('mouseup', async (event) => {
           finalText = summary;
         }
       }
-      
-      console.log('Final result:', finalText);
-      
-      // Speak the final text and show popup (only if we didn't translate, translation already speaks)
+
+      // Show custom floating popup
+      showSummaryPopup(finalText);
+
+      // Speak the result only if we didn't translate (translation already speaks)
       if (actionMode === 'summarize' && audioEnabled) {
         speak(finalText);
       }
-      showSummaryPopup(finalText);
+
     } catch (err) {
-      if (audioEnabled) speak('Operation failed: ' + err.message);
-      console.error('Operation error:', err);
+      alert('Error: ' + err.message);
+      console.error('Processing error:', err);
     }
+  }
+
+  async function handleFocusSummarizeKey(e) {
+    if (!focusSummarizeMode || !extensionEnabled) return;
+    
+    // Trigger with 'K' key
+    if (e.key.toLowerCase() !== 'k') return;
+
+    // Prevent default action
+    e.preventDefault();
+    e.stopPropagation();
+
+    const el = document.activeElement;
+    if (!el) {
+      if (audioEnabled) speak('No element is currently focused.');
+      return;
+    }
+
+    console.log('Focused element:', el.tagName, el);
+
+    // Check if the focused element is an image
+    if (el.tagName === 'IMG') {
+      await describeImage(el);
+      return;
+    }
+
+    // Check if the focused element contains an image
+    const imageInElement = el.querySelector('img');
+    if (imageInElement) {
+      await describeImage(imageInElement);
+      return;
+    }
+
+    // Process text content using shared function
+    await processTextContent(el);
   }
 
   // Hover mode handlers
@@ -484,8 +540,12 @@ document.addEventListener('mouseup', async (event) => {
     
     const el = e.target;
     
+    // Track the current hovered element for K key handler
+    currentHoveredElement = el;
+    
     // Ignore if hovering over our own popup
     if (el.id === 'visionai-summary-popup' || el.closest('#visionai-summary-popup')) {
+      currentHoveredElement = null;
       return;
     }
     
@@ -494,41 +554,18 @@ document.addEventListener('mouseup', async (event) => {
       clearTimeout(hoverTimeout);
     }
     
-    // Check if the element is an image or contains an image
-    let imageElement = null;
-    if (el.tagName === 'IMG') {
-      imageElement = el;
-    } else {
-      // Check if hovering over a container with a single prominent image
-      const images = el.querySelectorAll('img');
-      if (images.length === 1) {
-        imageElement = images[0];
-      }
-    }
-    
-    // If we found an image, handle it specially
-    if (imageElement) {
-      hoverTimeout = setTimeout(async () => {
-        if (imageElement === lastHoveredElement) return;
-        lastHoveredElement = imageElement;
-        
-        await describeImage(imageElement);
-      }, 1000);
-      return;
-    }
-    
-    // Wait 1 second before summarizing text content (debounce)
-    hoverTimeout = setTimeout(async () => {
-      // Don't summarize the same element twice in a row
-      if (el === lastHoveredElement) return;
-      lastHoveredElement = el;
-      
-      await summarizeElement(el);
-    }, 1000); // 1 second hover delay
+    // Note: Auto-processing is disabled. Press K to process the hovered element.
+    // Removed automatic processing after timeout for better user control
   }
 
   function handleMouseOut(e) {
     if (!hoverSummarizeMode || !extensionEnabled) return;
+    
+    // Clear the current hovered element when mouse leaves
+    const el = e.target;
+    if (currentHoveredElement === el) {
+      currentHoveredElement = null;
+    }
     
     // Clear timeout when mouse leaves
     if (hoverTimeout) {
@@ -537,130 +574,7 @@ document.addEventListener('mouseup', async (event) => {
     }
   }
 
-  async function summarizeElement(el) {
-    console.log('Hovered element:', el.tagName, el);
-
-    let text = '';
-
-    // First, check if the hovered element IS a paragraph itself
-    if (el.tagName === 'P' && el.innerText && el.innerText.trim().length > 20) {
-      text = el.innerText.trim();
-      console.log('Hovered element is a paragraph:', text.substring(0, 100));
-    }
-    // Second, check if we're hovering on something INSIDE a paragraph
-    else {
-      const paragraph = el.closest('p');
-      if (paragraph && paragraph.innerText && paragraph.innerText.trim().length > 20) {
-        text = paragraph.innerText.trim();
-        console.log('Got text from parent paragraph:', text.substring(0, 100));
-      }
-      // If not in a paragraph, try to get text from the hovered element itself
-      else if (el.innerText && el.innerText.trim().length > 20) {
-        text = el.innerText.trim();
-        console.log('Got text from element innerText:', text.substring(0, 100));
-      }
-      // Try textContent
-      else if (el.textContent && el.textContent.trim().length > 20) {
-        text = el.textContent.trim();
-        console.log('Got text from textContent:', text.substring(0, 100));
-      }
-    }
-
-    // If still no substantial text, look for surrounding paragraphs
-    if (!text || text.length < 20) {
-      console.log('Text too short, looking for surrounding paragraphs');
-      
-      // Try to find all paragraphs in the nearest container
-      const container = el.closest('article, main, section, div[role="article"], div[role="main"], .content, .post, .article');
-      
-      if (container) {
-        // Get all paragraphs within the container
-        const paragraphs = container.querySelectorAll('p');
-        if (paragraphs.length > 0) {
-          // Combine text from all paragraphs
-          text = Array.from(paragraphs)
-            .map(p => p.innerText.trim())
-            .filter(t => t.length > 0)
-            .join(' ')
-            .slice(0, 5000);
-          console.log('Got text from container paragraphs:', text.substring(0, 100));
-        }
-      }
-      
-      // If still nothing, try the parent element
-      if ((!text || text.length < 20) && el.parentElement && el.parentElement.innerText) {
-        text = el.parentElement.innerText.trim();
-        console.log('Got text from parent element:', text.substring(0, 100));
-      }
-    }
-
-    // Don't summarize if text is too short
-    if (!text || text.length < 20) {
-      console.log('Not enough text to summarize from hover');
-      return;
-    }
-
-    console.log('Final text to summarize (length ' + text.length + '):', text.substring(0, 200));
-
-    try {
-      let finalText = '';
-      
-      // Handle different action modes
-      if (actionMode === 'summarize') {
-        // Only summarize
-        if (audioEnabled) speak('Summarizing hovered content.');
-        finalText = await aiSummarizeWithBuiltIn(text, {
-          type: 'tldr',
-          format: 'plain-text',
-          length: 'short',
-          outputLanguage: 'en'
-        });
-      } 
-      else if (actionMode === 'translate') {
-        // Only translate
-        if (audioEnabled) speak('Translating hovered content.');
-        finalText = await aiTranslateWithBuiltIn(text, {
-          sourceLanguage: 'en',
-          targetLanguage: targetLanguage,
-          speak: audioEnabled // Enable automatic speech in target language
-        });
-      }
-      else if (actionMode === 'both') {
-        // Summarize first, then translate
-        if (audioEnabled) speak('Summarizing hovered content.');
-        const summary = await aiSummarizeWithBuiltIn(text, {
-          type: 'tldr',
-          format: 'plain-text',
-          length: 'short',
-          outputLanguage: 'en'
-        });
-        
-        if (targetLanguage !== 'en') {
-          if (audioEnabled) speak('Translating summary.');
-          finalText = await aiTranslateWithBuiltIn(summary, {
-            sourceLanguage: 'en',
-            targetLanguage: targetLanguage,
-            speak: audioEnabled // Enable automatic speech in target language
-          });
-        } else {
-          finalText = summary;
-        }
-      }
-      
-      console.log('Final result:', finalText);
-      
-      // Speak the final text and show popup (only if we didn't translate, translation already speaks)
-      if (actionMode === 'summarize' && audioEnabled) {
-        speak(finalText);
-      }
-      showSummaryPopup(finalText);
-    } catch (err) {
-      if (audioEnabled) speak('Operation failed: ' + err.message);
-      console.error('Operation error:', err);
-    }
-  }
-
-  // Function to describe images
+  // Function to describe images using Prompt API
   async function describeImage(imgElement) {
     console.log('Describing image:', imgElement);
     
@@ -685,16 +599,66 @@ document.addEventListener('mouseup', async (event) => {
       }
       
       // Get description using Prompt API (with fallback)
-      const description = await aiDescribeImageWithPromptAPI(imageUrl, altText);
+      let description = await aiDescribeImageWithPromptAPI(imageUrl, altText);
       
       console.log('Image description:', description);
       
-      // Show the description in popup
-      showSummaryPopup(description);
+      let finalDescription = description;
       
-      // Speak the description
-      if (audioEnabled) {
-        speak(description);
+      // Handle translation based on action mode
+      if (actionMode === 'translate') {
+        // Only translate the description
+        if (targetLanguage !== 'en') {
+          if (audioEnabled) speak('Translating image description.');
+          finalDescription = await aiTranslateWithBuiltIn(description, {
+            sourceLanguage: 'en',
+            targetLanguage: targetLanguage,
+            speak: audioEnabled // Enable automatic speech in target language
+          });
+        }
+      } 
+      else if (actionMode === 'both') {
+        // Summarize description first (keep it concise), then translate
+        if (audioEnabled) speak('Processing image description.');
+        
+        // For images, descriptions are already concise, but we can shorten if needed
+        let processedDescription = description;
+        
+        // Only summarize if description is longer than 200 characters
+        if (description.length > 200) {
+          try {
+            processedDescription = await aiSummarizeWithBuiltIn(description, {
+              type: 'tldr',
+              format: 'plain-text',
+              length: 'short',
+              outputLanguage: 'en'
+            });
+          } catch (err) {
+            console.log('Could not summarize description, using original:', err);
+            processedDescription = description;
+          }
+        }
+        
+        // Then translate if target language is not English
+        if (targetLanguage !== 'en') {
+          if (audioEnabled) speak('Translating image description.');
+          finalDescription = await aiTranslateWithBuiltIn(processedDescription, {
+            sourceLanguage: 'en',
+            targetLanguage: targetLanguage,
+            speak: audioEnabled // Enable automatic speech in target language
+          });
+        } else {
+          finalDescription = processedDescription;
+        }
+      }
+      // If actionMode is 'summarize', just use the original description (already concise)
+      
+      // Show the final description in popup
+      showSummaryPopup(finalDescription);
+      
+      // Speak the description only if we didn't translate (translation already speaks)
+      if (actionMode === 'summarize' && audioEnabled) {
+        speak(finalDescription);
       }
       
     } catch (err) {
@@ -711,9 +675,24 @@ document.addEventListener('mouseup', async (event) => {
         fallbackDescription = `Image detected: ${imageName}. No description available.`;
       }
       
+      // Try to translate fallback description if needed
+      if ((actionMode === 'translate' || actionMode === 'both') && targetLanguage !== 'en') {
+        try {
+          fallbackDescription = await aiTranslateWithBuiltIn(fallbackDescription, {
+            sourceLanguage: 'en',
+            targetLanguage: targetLanguage,
+            speak: audioEnabled
+          });
+        } catch (translateErr) {
+          console.error('Could not translate fallback description:', translateErr);
+          // Use original fallback if translation fails
+        }
+      }
+      
       showSummaryPopup(fallbackDescription);
       
-      if (audioEnabled) {
+      // Speak fallback only if we didn't translate (translation already speaks)
+      if (actionMode === 'summarize' && audioEnabled) {
         speak(fallbackDescription);
       }
     }

@@ -1,3 +1,47 @@
+// Summarization function using Summarizer API directly
+async function aiSummarizeWithPromptAPI(text, options = {}) {
+  if (typeof Summarizer === 'undefined') {
+    throw new Error('Summarizer API not supported in this browser.');
+  }
+
+  const summaryType = options.type || 'tl;dr';
+  const summaryLength = options.length || 'short';
+
+  console.log(`Summarization request: type=${summaryType}, length=${summaryLength}`);
+  console.log('Text to summarize:', text.substring(0, 100));
+
+  // Check availability
+  const availability = await Summarizer.availability();
+  if (availability === 'unavailable') {
+    throw new Error('Summarizer API is unavailable on this device.');
+  }
+
+  console.log('Creating summarizer...');
+
+  // Create summarizer
+  const summarizer = await Summarizer.create({
+    type: summaryType,
+    format: options.format || 'plain-text',
+    length: summaryLength,
+    outputLanguage: 'en',
+    expectedInputLanguages: ['en'],
+    expectedContextLanguages: ['en'],
+    sharedContext: options.sharedContext || 'Summarizing general English text.'
+  });
+
+  console.log('Summarizer created. Generating summary...');
+
+  // Generate summary
+  const summary = await summarizer.summarize(text, {
+    context: options.context || 'Summarize this content clearly and concisely.'
+  });
+
+  console.log('Summary result:', summary);
+
+  return summary;
+}
+
+// Legacy function for backward compatibility
 async function aiSummarizeWithBuiltIn(text, options = {}) {
   if (!('Summarizer' in self)) {
     throw new Error('Summarizer API not supported in this browser.');
@@ -30,6 +74,57 @@ async function aiSummarizeWithBuiltIn(text, options = {}) {
   return summary;
 }
 
+// Translation function using Translator API directly
+async function aiTranslateWithPromptAPI(text, options = {}) {
+  if (typeof Translator === 'undefined') {
+    throw new Error('Translator API not supported in this browser.');
+  }
+
+  const sourceLanguage = options.sourceLanguage || 'en';
+  const targetLanguage = options.targetLanguage || 'es';
+
+  console.log(`Translation request: ${sourceLanguage} -> ${targetLanguage}`);
+  console.log('Text to translate:', text.substring(0, 100));
+
+  // Check if translation is available for this language pair
+  const availability = await Translator.availability({
+    sourceLanguage: sourceLanguage,
+    targetLanguage: targetLanguage,
+  });
+
+  if (availability === 'no') {
+    throw new Error(`Translation from ${sourceLanguage} to ${targetLanguage} is not available.`);
+  }
+
+  console.log('Creating translator...');
+
+  // Create translator with download progress monitoring
+  const translator = await Translator.create({
+    sourceLanguage: sourceLanguage,
+    targetLanguage: targetLanguage,
+    monitor(m) {
+      m.addEventListener('downloadprogress', (e) => {
+        console.log(`Translation model downloaded ${(e.loaded * 100).toFixed(2)}%`);
+      });
+    },
+  });
+
+  console.log('Translator created. Translating text...');
+
+  // Translate the text
+  const translatedText = await translator.translate(text);
+
+  console.log('Translation result:', translatedText);
+
+  // Speak the translated text in the target language
+  if (options.speak !== false) {
+    speakInLanguage(translatedText, targetLanguage);
+  }
+
+  return translatedText;
+}
+
+// Legacy function for backward compatibility
 async function aiTranslateWithBuiltIn(text, options = {}) {
   if (!('Translator' in self)) {
     throw new Error('Translator API not supported in this browser.');
@@ -118,8 +213,8 @@ function speakInLanguage(text, languageCode) {
 
 // Function to describe images using Prompt API or fallback to alt text
 async function aiDescribeImageWithPromptAPI(imageUrl, altText = '') {
-  // Check if Prompt API is supported
-  const isPromptAPISupported = ('ai' in self) && ('languageModel' in self.ai);
+  // Check if Prompt API is supported (using correct API check)
+  const isPromptAPISupported = typeof LanguageModel !== 'undefined';
   
   console.log('Prompt API supported:', isPromptAPISupported);
   
@@ -136,11 +231,12 @@ async function aiDescribeImageWithPromptAPI(imageUrl, altText = '') {
   }
 
   try {
-    const { available } = await self.ai.languageModel.availability();
+    // Check availability using the correct API
+    const availability = await LanguageModel.availability();
     
-    console.log('Language model availability:', available);
+    console.log('Language model availability:', availability);
     
-    if (available === 'no') {
+    if (availability === 'unavailable') {
       console.log('Language model not available, using fallback');
       // Fallback description
       if (altText && altText.trim().length > 0) {
@@ -153,8 +249,14 @@ async function aiDescribeImageWithPromptAPI(imageUrl, altText = '') {
 
     console.log('Creating language model session for image description');
     
-    const session = await self.ai.languageModel.create({
-      systemPrompt: 'You are a helpful assistant that describes images for visually impaired users. Provide clear, concise, and informative descriptions.'
+    // Create session with initial system prompt
+    const session = await LanguageModel.create({
+      initialPrompts: [
+        {
+          role: 'system',
+          content: 'You are a helpful assistant that describes images for visually impaired users. Provide clear, concise, and informative descriptions.'
+        }
+      ]
     });
 
     let prompt = '';
@@ -186,7 +288,113 @@ async function aiDescribeImageWithPromptAPI(imageUrl, altText = '') {
   }
 }
 
+// Function to check AI API availability and provide setup instructions
+async function checkAIAvailability() {
+  const status = {
+    isSupported: false,
+    isAvailable: false,
+    capabilities: {},
+    instructions: []
+  };
+
+  // Check if Prompt API (LanguageModel) exists
+  if (typeof LanguageModel === 'undefined') {
+    status.instructions.push('❌ Chrome Built-in AI (Prompt API) is not supported in this browser.');
+    status.instructions.push('📋 Setup Instructions:');
+    status.instructions.push('1. Download Chrome Canary or Chrome Dev (version 127+)');
+    status.instructions.push('2. Enable flag: chrome://flags/#prompt-api-for-gemini-nano');
+    status.instructions.push('3. Enable flag: chrome://flags/#optimization-guide-on-device-model (use "Enabled BypassPerfRequirement")');
+    status.instructions.push('4. Restart Chrome');
+    status.instructions.push('5. Download model at chrome://components/ (look for "Optimization Guide On Device Model")');
+    status.instructions.push('6. Check chrome://on-device-internals for model status');
+    return status;
+  }
+
+  status.isSupported = true;
+
+  // Check Language Model (Prompt API) availability
+  try {
+    const availability = await LanguageModel.availability();
+    status.capabilities.languageModel = { availability };
+    
+    if (availability === 'readily') {
+      status.isAvailable = true;
+      status.instructions.push('✅ Language Model (Prompt API) is ready to use!');
+      
+      // Get model parameters
+      try {
+        const params = await LanguageModel.params();
+        status.capabilities.languageModel.params = params;
+        status.instructions.push(`   Temperature: ${params.defaultTemperature} (max: ${params.maxTemperature})`);
+        status.instructions.push(`   TopK: ${params.defaultTopK} (max: ${params.maxTopK})`);
+      } catch (error) {
+        status.instructions.push(`⚠️ Could not fetch model parameters: ${error.message}`);
+      }
+    } else if (availability === 'downloadable') {
+      status.instructions.push('📥 Language Model is downloadable. User interaction required to start download.');
+      status.instructions.push('   Click on the page, then the model will download automatically.');
+    } else if (availability === 'downloading') {
+      status.instructions.push('⏳ Language Model is currently downloading...');
+      status.instructions.push('   Check progress at chrome://on-device-internals');
+    } else {
+      status.instructions.push(`❌ Language Model availability: ${availability}`);
+      status.instructions.push('   Go to chrome://components/ and update "Optimization Guide On Device Model"');
+    }
+  } catch (error) {
+    status.instructions.push(`⚠️ Language Model check failed: ${error.message}`);
+    status.instructions.push('   Make sure all flags are enabled and Chrome is restarted');
+  }
+
+  // Check Summarizer API
+  if (typeof Summarizer !== 'undefined') {
+    try {
+      const summarizerAvailability = await Summarizer.availability();
+      status.capabilities.summarizer = summarizerAvailability;
+      
+      if (summarizerAvailability === 'readily') {
+        status.instructions.push('✅ Summarizer API is ready to use!');
+      } else if (summarizerAvailability === 'downloadable' || summarizerAvailability === 'downloading') {
+        status.instructions.push(`⏳ Summarizer status: ${summarizerAvailability}`);
+      } else {
+        status.instructions.push(`❌ Summarizer availability: ${summarizerAvailability}`);
+      }
+    } catch (error) {
+      status.instructions.push(`⚠️ Summarizer check failed: ${error.message}`);
+    }
+  } else {
+    status.instructions.push('ℹ️ Summarizer API not found (may not be enabled yet)');
+  }
+
+  // Check Translator API
+  if (typeof Translator !== 'undefined') {
+    status.capabilities.translator = true;
+    status.instructions.push('✅ Translator API is available!');
+  } else {
+    status.instructions.push('ℹ️ Translator API not found (may not be enabled yet)');
+  }
+
+  return status;
+}
+
+// Function to display AI availability status in console
+async function displayAIStatus() {
+  console.log('🔍 Checking Chrome Built-in AI availability...\n');
+  const status = await checkAIAvailability();
+  
+  console.log('Support Status:', status.isSupported ? '✅ Supported' : '❌ Not Supported');
+  console.log('Available Status:', status.isAvailable ? '✅ Available' : '⏳ Setup Required');
+  console.log('\nCapabilities:', status.capabilities);
+  console.log('\n📋 Instructions:');
+  status.instructions.forEach(instruction => console.log(instruction));
+  
+  return status;
+}
+
 window.aiSummarizeWithBuiltIn = aiSummarizeWithBuiltIn;
+window.aiSummarizeWithPromptAPI = aiSummarizeWithPromptAPI;
 window.aiTranslateWithBuiltIn = aiTranslateWithBuiltIn;
+window.aiTranslateWithPromptAPI = aiTranslateWithPromptAPI;
 window.speakInLanguage = speakInLanguage;
 window.aiDescribeImageWithPromptAPI = aiDescribeImageWithPromptAPI;
+window.checkAIAvailability = checkAIAvailability;
+window.displayAIStatus = displayAIStatus;

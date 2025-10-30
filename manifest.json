@@ -3,7 +3,7 @@
   "name": "VisionAI - Chrome Assistant for Visually Impaired",
   "version": "1.0",
   "description": "AI-powered voice assistant that helps visually impaired users interact with webpages using on-device AI.",
-  "permissions": ["activeTab", "scripting", "storage", "ai"],
+  "permissions": ["activeTab", "scripting", "storage"],
   "background": {
     "service_worker": "background.js"
   },

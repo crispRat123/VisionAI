@@ -215,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusMessage += ` | Active: ${modes.join(' & ')}`;
         statusText.style.color = '#28a745';
       } else {
-        statusMessage += ` | Active: None`;
+        statusMessage += ` | Active: Manual Selection`;
         statusText.style.color = '#666';
       }
       
