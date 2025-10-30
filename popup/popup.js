@@ -1,71 +1,144 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const masterToggleContainer = document.getElementById('masterToggleContainer');
+    const masterToggleSwitch = document.getElementById('masterToggleSwitch');
+    const masterToggleSlider = document.getElementById('masterToggleSlider');
+    const masterToggleText = document.getElementById('masterToggleText');
+    const settingsContent = document.getElementById('settingsContent');
+    const noneMode = document.getElementById('noneMode');
     const focusToggle = document.getElementById('focusToggle');
     const hoverToggle = document.getElementById('hoverToggle');
+    const audioToggle = document.getElementById('audioToggle');
     const actionMode = document.getElementById('actionMode');
     const targetLanguage = document.getElementById('targetLanguage');
     const statusText = document.getElementById('status');
 
-    // Load saved state from storage
-    chrome.storage.local.get(['focusModeEnabled', 'hoverModeEnabled', 'actionMode', 'targetLanguage'], (result) => {
+    chrome.storage.local.get(['extensionEnabled', 'focusModeEnabled', 'hoverModeEnabled', 'audioEnabled', 'actionMode', 'targetLanguage'], (result) => {
+      const extensionEnabled = result.extensionEnabled !== undefined ? result.extensionEnabled : true;
       const focusEnabled = result.focusModeEnabled || false;
       const hoverEnabled = result.hoverModeEnabled || false;
+      const audioEnabled = result.audioEnabled !== undefined ? result.audioEnabled : true;
       const savedActionMode = result.actionMode || 'summarize';
       const savedTargetLanguage = result.targetLanguage || 'es';
       
-      focusToggle.checked = focusEnabled;
-      hoverToggle.checked = hoverEnabled;
+      updateMasterToggle(extensionEnabled);
+      
+      if (focusEnabled) {
+        focusToggle.checked = true;
+      } else if (hoverEnabled) {
+        hoverToggle.checked = true;
+      } else {
+        noneMode.checked = true;
+      }
+      
+      audioToggle.checked = audioEnabled;
       actionMode.value = savedActionMode;
       targetLanguage.value = savedTargetLanguage;
       
-      updateStatus(focusEnabled, hoverEnabled, savedActionMode);
+      updateStatus(extensionEnabled, focusEnabled, hoverEnabled, savedActionMode, audioEnabled);
     });
 
-    // Handle focus toggle change
+    masterToggleContainer.addEventListener('click', () => {
+      const currentState = masterToggleSwitch.classList.contains('active');
+      const newState = !currentState;
+      
+      updateMasterToggle(newState);
+      chrome.storage.local.set({ extensionEnabled: newState });
+      
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'extension_toggle',
+              enabled: newState
+            }).catch(() => {});
+          }
+        });
+      });
+      
+      const focusEnabled = focusToggle.checked;
+      const hoverEnabled = hoverToggle.checked;
+      updateStatus(newState, focusEnabled, hoverEnabled, actionMode.value, audioToggle.checked);
+    });
+
     focusToggle.addEventListener('change', () => {
-      const isEnabled = focusToggle.checked;
-      
-      // Save state to storage
-      chrome.storage.local.set({ focusModeEnabled: isEnabled });
-      
-      // Send message to active tab
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, {
-            type: isEnabled ? 'focus_mode_on' : 'focus_mode_off'
-          });
-        }
-      });
-      
-      updateStatus(isEnabled, hoverToggle.checked, actionMode.value);
+      if (focusToggle.checked) {
+        chrome.storage.local.set({ focusModeEnabled: true, hoverModeEnabled: false });
+        
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs[0]?.id) {
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'focus_mode_on' });
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'hover_mode_off' });
+          }
+        });
+        
+        chrome.storage.local.get(['extensionEnabled'], (result) => {
+          const extensionEnabled = result.extensionEnabled !== undefined ? result.extensionEnabled : true;
+          updateStatus(extensionEnabled, true, false, actionMode.value, audioToggle.checked);
+        });
+      }
     });
 
-    // Handle hover toggle change
     hoverToggle.addEventListener('change', () => {
-      const isEnabled = hoverToggle.checked;
+      if (hoverToggle.checked) {
+        chrome.storage.local.set({ focusModeEnabled: false, hoverModeEnabled: true });
+        
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs[0]?.id) {
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'hover_mode_on' });
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'focus_mode_off' });
+          }
+        });
+        
+        chrome.storage.local.get(['extensionEnabled'], (result) => {
+          const extensionEnabled = result.extensionEnabled !== undefined ? result.extensionEnabled : true;
+          updateStatus(extensionEnabled, false, true, actionMode.value, audioToggle.checked);
+        });
+      }
+    });
+
+    noneMode.addEventListener('change', () => {
+      if (noneMode.checked) {
+        chrome.storage.local.set({ focusModeEnabled: false, hoverModeEnabled: false });
+        
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs[0]?.id) {
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'focus_mode_off' });
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'hover_mode_off' });
+          }
+        });
+        
+        chrome.storage.local.get(['extensionEnabled'], (result) => {
+          const extensionEnabled = result.extensionEnabled !== undefined ? result.extensionEnabled : true;
+          updateStatus(extensionEnabled, false, false, actionMode.value, audioToggle.checked);
+        });
+      }
+    });
+
+    audioToggle.addEventListener('change', () => {
+      const isEnabled = audioToggle.checked;
       
-      // Save state to storage
-      chrome.storage.local.set({ hoverModeEnabled: isEnabled });
+      chrome.storage.local.set({ audioEnabled: isEnabled });
       
-      // Send message to active tab
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]?.id) {
           chrome.tabs.sendMessage(tabs[0].id, {
-            type: isEnabled ? 'hover_mode_on' : 'hover_mode_off'
+            type: 'audio_toggle',
+            audioEnabled: isEnabled
           });
         }
       });
       
-      updateStatus(focusToggle.checked, isEnabled, actionMode.value);
+      chrome.storage.local.get(['extensionEnabled'], (result) => {
+        const extensionEnabled = result.extensionEnabled !== undefined ? result.extensionEnabled : true;
+        updateStatus(extensionEnabled, focusToggle.checked, hoverToggle.checked, actionMode.value, isEnabled);
+      });
     });
 
-    // Handle action mode change
     actionMode.addEventListener('change', () => {
       const selectedMode = actionMode.value;
       
-      // Save state to storage
       chrome.storage.local.set({ actionMode: selectedMode });
       
-      // Send message to active tab
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]?.id) {
           chrome.tabs.sendMessage(tabs[0].id, {
@@ -76,17 +149,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
       
-      updateStatus(focusToggle.checked, hoverToggle.checked, selectedMode);
+      chrome.storage.local.get(['extensionEnabled'], (result) => {
+        const extensionEnabled = result.extensionEnabled !== undefined ? result.extensionEnabled : true;
+        updateStatus(extensionEnabled, focusToggle.checked, hoverToggle.checked, selectedMode, audioToggle.checked);
+      });
     });
 
-    // Handle target language change
     targetLanguage.addEventListener('change', () => {
       const selectedLanguage = targetLanguage.value;
       
-      // Save state to storage
       chrome.storage.local.set({ targetLanguage: selectedLanguage });
       
-      // Send message to active tab
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]?.id) {
           chrome.tabs.sendMessage(tabs[0].id, {
@@ -98,7 +171,29 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    function updateStatus(focusEnabled, hoverEnabled, currentActionMode) {
+    function updateMasterToggle(enabled) {
+      if (enabled) {
+        masterToggleSwitch.classList.add('active');
+        masterToggleSlider.classList.add('active');
+        masterToggleContainer.classList.remove('disabled');
+        settingsContent.classList.remove('disabled');
+        masterToggleText.textContent = '🚀 VisionAI Enabled';
+      } else {
+        masterToggleSwitch.classList.remove('active');
+        masterToggleSlider.classList.remove('active');
+        masterToggleContainer.classList.add('disabled');
+        settingsContent.classList.add('disabled');
+        masterToggleText.textContent = '⏸️ VisionAI Disabled';
+      }
+    }
+
+    function updateStatus(extensionEnabled, focusEnabled, hoverEnabled, currentActionMode, audioEnabled) {
+      if (!extensionEnabled) {
+        statusText.textContent = 'Extension is disabled';
+        statusText.style.color = '#dc3545';
+        return;
+      }
+      
       const modes = [];
       if (focusEnabled) modes.push('Focus (Tab + K)');
       if (hoverEnabled) modes.push('Hover (Mouse)');
@@ -114,17 +209,17 @@ document.addEventListener('DOMContentLoaded', () => {
         actionText = `Summarize + Translate to ${langName}`;
       }
       
-      let statusMessage = '';
-      if (modes.length > 0 || currentActionMode) {
-        statusMessage = `Mode: ${actionText}`;
-        if (modes.length > 0) {
-          statusMessage += ` | Active: ${modes.join(' & ')}`;
-        }
+      let statusMessage = `Mode: ${actionText}`;
+      
+      if (modes.length > 0) {
+        statusMessage += ` | Active: ${modes.join(' & ')}`;
         statusText.style.color = '#28a745';
       } else {
-        statusMessage = `Mode: ${actionText}`;
+        statusMessage += ` | Active: None`;
         statusText.style.color = '#666';
       }
+      
+      statusMessage += ` | Audio: ${audioEnabled ? 'ON' : 'OFF'}`;
       statusText.textContent = statusMessage;
     }
   });
